@@ -26,7 +26,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Continue'
 
 # --- Configuration ---
-$ScriptDir        = 'C:\workspace\personal\windowsShutDown'
+$ScriptDir        = 'C:\workspace\other\windowsShutDown'
 $ShutdownLog      = Join-Path $ScriptDir 'lastShutDown.txt'
 $RecommendFile    = Join-Path $ScriptDir 'generalRecommendations.txt'
 $DriverFile       = Join-Path $ScriptDir 'driverSnapshot.txt'
@@ -50,13 +50,13 @@ $BugcheckMap = @{
     0x000000D1 = @{ Name = 'DRIVER_IRQL_NOT_LESS_OR_EQUAL';     Cause = 'A driver accessed paged memory at too high an IRQL. Very common driver bug, especially NIC/Wi-Fi.' }
     0x000000EF = @{ Name = 'CRITICAL_PROCESS_DIED';             Cause = 'A critical system process terminated unexpectedly. Can be caused by corrupted system files.' }
     0x000000F4 = @{ Name = 'CRITICAL_OBJECT_TERMINATION';       Cause = 'A critical system object was terminated. Possible disk or driver issue.' }
-    0x00000116 = @{ Name = 'VIDEO_TDR_FAILURE';                 Cause = 'The display driver failed to respond in time. GPU driver crash — update or roll back GPU drivers.' }
+    0x00000116 = @{ Name = 'VIDEO_TDR_FAILURE';                 Cause = 'The display driver failed to respond in time. GPU driver crash -- update or roll back GPU drivers.' }
     0x00000124 = @{ Name = 'WHEA_UNCORRECTABLE_ERROR';          Cause = 'Hardware error detected (CPU, RAM, or bus). May indicate failing hardware or overclocking issues.' }
     0x00000133 = @{ Name = 'DPC_WATCHDOG_VIOLATION';            Cause = 'A DPC routine ran too long. Often caused by storage drivers (SSD firmware) or NIC drivers.' }
     0x0000013A = @{ Name = 'KERNEL_MODE_HEAP_CORRUPTION';       Cause = 'Kernel heap corruption detected. Usually a driver bug.' }
-    0x00000154 = @{ Name = 'UNEXPECTED_STORE_EXCEPTION';        Cause = 'Store component caught an unexpected exception. Often disk-related — check drive health.' }
+    0x00000154 = @{ Name = 'UNEXPECTED_STORE_EXCEPTION';        Cause = 'Store component caught an unexpected exception. Often disk-related -- check drive health.' }
     0x000001CA = @{ Name = 'SYNTHETIC_WATCHDOG_TIMEOUT';        Cause = 'The system did not respond in time. Can be caused by overloaded storage or misbehaving driver.' }
-    0x00000019 = @{ Name = 'BAD_POOL_HEADER';                   Cause = 'Pool header corruption. Often caused by a driver writing out of bounds — faulty driver or bad RAM.' }
+    0x00000019 = @{ Name = 'BAD_POOL_HEADER';                   Cause = 'Pool header corruption. Often caused by a driver writing out of bounds -- faulty driver or bad RAM.' }
 }
 
 # ============================================================
@@ -69,7 +69,7 @@ if ($Install) {
         exit 1
     }
 
-    # Remove existing task first (idempotent — no duplicates)
+    # Remove existing task first (idempotent -- no duplicates)
     $existing = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
     if ($existing) {
         Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false
@@ -195,7 +195,7 @@ function Get-PowerConfig {
         $hiberReg = Get-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Power' -Name 'HiberbootEnabled' -ErrorAction SilentlyContinue
         $info['FastStartupEnabled'] = if ($hiberReg -and $hiberReg.HiberbootEnabled -eq 1) { $true } else { $false }
 
-        # Hybrid Sleep — read active power scheme
+        # Hybrid Sleep -- read active power scheme
         $schemeOutput = & powercfg /getactivescheme 2>&1 | Out-String
         if ($schemeOutput -match '([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})') {
             $schemeGuid = $Matches[1]
@@ -213,7 +213,7 @@ function Get-PowerConfig {
 
 function Refresh-DriverSnapshot {
     $lines = @()
-    $lines += "Driver Snapshot — Generated $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
+    $lines += "Driver Snapshot -- Generated $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
     $lines += '=' * 60
 
     $categories = @(
@@ -257,7 +257,7 @@ function Refresh-SleepStudy {
 
 function Refresh-Recommendations {
     $lines = @()
-    $lines += "Power Configuration Audit — Generated $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
+    $lines += "Power Configuration Audit -- Generated $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
     $lines += '=' * 60
     $lines += ''
 
@@ -320,7 +320,7 @@ function Get-TrendSummary {
     if (-not (Test-Path $ShutdownLog)) { return $null }
     $content = Get-Content $ShutdownLog -Raw
     # Parse timestamps from log entries
-    $pattern = '===\s+ABNORMAL SHUTDOWN DETECTED\s+—\s+(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})\s+==='
+    $pattern = '===\s+ABNORMAL SHUTDOWN DETECTED\s+--\s+(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})\s+==='
     $matches_ = [regex]::Matches($content, $pattern)
     if ($matches_.Count -lt 3) { return $null }
 
@@ -344,7 +344,7 @@ function Get-TrendSummary {
     $hourGroups = $timestamps | Group-Object { $_.Hour } | Sort-Object Count -Descending | Select-Object -First 3
     $lines += 'Most common hours of occurrence:'
     foreach ($g in $hourGroups) {
-        $lines += "  $($g.Name):00 — $($g.Count) occurrence(s)"
+        $lines += "  $($g.Name):00 -- $($g.Count) occurrence(s)"
     }
 
     # Recurring bugcheck codes
@@ -357,7 +357,7 @@ function Get-TrendSummary {
         foreach ($g in $codeGroups) {
             $bc = $BugcheckMap[[int]$g.Name]
             $name = if ($bc) { $bc.Name } else { 'UNKNOWN' }
-            $lines += "  $($g.Name) ($name) — $($g.Count) time(s)"
+            $lines += "  $($g.Name) ($name) -- $($g.Count) time(s)"
         }
     }
 
@@ -438,19 +438,19 @@ if ($lastAbnormalTime -eq [datetime]::MinValue) {
 }
 
 if ($lastCleanTime -gt $lastAbnormalTime) {
-    # Most recent event was a clean shutdown — normal
+    # Most recent event was a clean shutdown -- normal
     exit 0
 }
 
 # ============================================================
-# ABNORMAL SHUTDOWN DETECTED — DIAGNOSE
+# ABNORMAL SHUTDOWN DETECTED -- DIAGNOSE
 # ============================================================
 
 $report = @()
 $timestamp = $now.ToString('yyyy-MM-dd HH:mm:ss')
 $report += ''
 $report += ('=' * 70)
-$report += "=== ABNORMAL SHUTDOWN DETECTED — $timestamp ==="
+$report += "=== ABNORMAL SHUTDOWN DETECTED -- $timestamp ==="
 $report += ('=' * 70)
 $report += ''
 
@@ -535,11 +535,11 @@ $wakeEvent  = Get-EventsSince -LogName 'System' -EventIds @(107) -After $bootTim
 
 if ($sleepEvent) {
     $lastSleep = $sleepEvent | Sort-Object TimeCreated -Descending | Select-Object -First 1
-    $report += "Last Sleep Entry: $($lastSleep.TimeCreated) — $($lastSleep.Message)"
+    $report += "Last Sleep Entry: $($lastSleep.TimeCreated) -- $($lastSleep.Message)"
 }
 if ($wakeEvent) {
     $lastWake = $wakeEvent | Sort-Object TimeCreated -Descending | Select-Object -First 1
-    $report += "Last Wake (Event 107): $($lastWake.TimeCreated) — $($lastWake.Message)"
+    $report += "Last Wake (Event 107): $($lastWake.TimeCreated) -- $($lastWake.Message)"
 }
 $report += ''
 
@@ -554,7 +554,7 @@ $recentErrors = Get-RecentErrorEvents -Before $bootTime
 if ($recentErrors) {
     $report += '--- Recent System Errors/Critical Events (24h before crash) ---'
     foreach ($ev in $recentErrors) {
-        $report += "  [$($ev.TimeCreated)] ID:$($ev.Id) Source:$($ev.ProviderName) — $($ev.Message)"
+        $report += "  [$($ev.TimeCreated)] ID:$($ev.Id) Source:$($ev.ProviderName) -- $($ev.Message)"
     }
     $report += ''
 }
@@ -615,7 +615,7 @@ if ($bugcheckCode -ne 0) {
         'VIDEO_TDR_FAILURE' {
             $fixSuggestions += 'UPDATE your GPU driver to the latest version from NVIDIA/AMD/Intel.'
             $fixSuggestions += 'If already latest, try ROLLING BACK to a previous GPU driver version.'
-            $fixSuggestions += 'Check GPU temperatures — overheating can cause TDR failures.'
+            $fixSuggestions += 'Check GPU temperatures -- overheating can cause TDR failures.'
         }
         'DRIVER_IRQL_NOT_LESS_OR_EQUAL' {
             $fixSuggestions += 'A driver is accessing memory incorrectly.'
