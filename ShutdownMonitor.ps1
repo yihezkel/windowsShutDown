@@ -168,6 +168,63 @@ function Get-BugcheckInfo {
     return @{ Name = 'UNKNOWN_BUGCHECK'; Cause = "Bugcheck code $(Format-BugcheckCode $Code) is not in the common-codes database." }
 }
 
+function Get-BitLockerRecoveryEvents {
+    param([datetime]$After)
+    $events = @()
+    # Event 798 from BitLocker-Driver: explains WHY recovery was needed
+    try {
+        $events += Get-WinEvent -FilterHashtable @{
+            LogName   = 'Microsoft-Windows-BitLocker/BitLocker Management'
+            StartTime = $After.AddDays(-7)
+            EndTime   = $After.AddMinutes(5)
+        } -MaxEvents 10 -ErrorAction SilentlyContinue
+    } catch {}
+    # BitLocker-Driver operational events (TPM validation failures)
+    try {
+        $events += Get-WinEvent -FilterHashtable @{
+            ProviderName = 'Microsoft-Windows-BitLocker-Driver'
+            StartTime    = $After.AddDays(-7)
+            EndTime      = $After.AddMinutes(5)
+        } -MaxEvents 10 -ErrorAction SilentlyContinue
+    } catch {}
+    # BitLocker-API recovery events (Event 24 = recovery password used)
+    try {
+        $events += Get-WinEvent -FilterHashtable @{
+            ProviderName = 'Microsoft-Windows-BitLocker-API'
+            Id           = 24
+            StartTime    = $After.AddDays(-7)
+            EndTime      = $After.AddMinutes(5)
+        } -MaxEvents 10 -ErrorAction SilentlyContinue
+    } catch {}
+    # TPM events that may explain why BitLocker couldn't unseal
+    try {
+        $events += Get-WinEvent -FilterHashtable @{
+            ProviderName = 'Microsoft-Windows-TPM-WMI'
+            Level        = @(1, 2, 3)  # Critical, Error, Warning
+            StartTime    = $After.AddDays(-7)
+            EndTime      = $After.AddMinutes(5)
+        } -MaxEvents 5 -ErrorAction SilentlyContinue
+    } catch {}
+    return $events | Where-Object { $_ } | Sort-Object TimeCreated -Descending
+}
+
+function Format-BitLockerReport {
+    param($Events)
+    $lines = @()
+    $lines += '--- BITLOCKER RECOVERY EVENTS ---'
+    $lines += 'BitLocker required the recovery key during the last boot.'
+    $lines += 'This typically means the TPM could not validate the boot configuration.'
+    $lines += 'Common causes: abnormal shutdown corrupted boot data, BIOS/firmware update,'
+    $lines += 'boot order change, Secure Boot policy change, or TPM reset.'
+    $lines += ''
+    foreach ($ev in $Events) {
+        $lines += "  [$($ev.TimeCreated)] Source: $($ev.ProviderName) ID: $($ev.Id)"
+        $lines += "  $($ev.Message)"
+        $lines += ''
+    }
+    return $lines
+}
+
 function Get-LastWakeSource {
     try {
         $output = & powercfg /lastwake 2>&1 | Out-String
@@ -432,13 +489,59 @@ if ($kernelPower41) {
     if ($t -gt $lastAbnormalTime) { $lastAbnormalTime = $t }
 }
 
+# --- BitLocker Recovery Check (runs regardless of shutdown type) ---
+$bitlockerEvents = Get-BitLockerRecoveryEvents -After $bootTime
+$bitlockerTriggered = $bitlockerEvents.Count -gt 0
+
 if ($lastAbnormalTime -eq [datetime]::MinValue) {
-    # No abnormal shutdown detected
+    if (-not $bitlockerTriggered) {
+        # No abnormal shutdown and no BitLocker recovery — truly normal
+        exit 0
+    }
+    # Normal shutdown BUT BitLocker recovery was triggered — report it
+    $report = @()
+    $timestamp = $now.ToString('yyyy-MM-dd HH:mm:ss')
+    $report += ''
+    $report += ('=' * 70)
+    $report += "=== BITLOCKER RECOVERY DETECTED (NORMAL SHUTDOWN) — $timestamp ==="
+    $report += ('=' * 70)
+    $report += ''
+    $report += 'The last shutdown was NORMAL, but BitLocker required the recovery key'
+    $report += 'at the next boot. This suggests something changed the boot configuration'
+    $report += 'between shutdown and startup (BIOS update, boot order change, Secure Boot'
+    $report += 'policy change, TPM issue, or a one-time TPM measurement mismatch).'
+    $report += ''
+    $report += (Format-BitLockerReport -Events $bitlockerEvents)
+    $report += ''
+    $report += ('-' * 70)
+    $report | Out-File -FilePath $ShutdownLog -Append -Encoding UTF8
+    Start-Process notepad.exe $ShutdownLog
     exit 0
 }
 
 if ($lastCleanTime -gt $lastAbnormalTime) {
-    # Most recent event was a clean shutdown — normal
+    if (-not $bitlockerTriggered) {
+        # Most recent event was a clean shutdown and no BitLocker recovery — normal
+        exit 0
+    }
+    # Clean shutdown BUT BitLocker recovery was triggered — report it
+    $report = @()
+    $timestamp = $now.ToString('yyyy-MM-dd HH:mm:ss')
+    $report += ''
+    $report += ('=' * 70)
+    $report += "=== BITLOCKER RECOVERY DETECTED (NORMAL SHUTDOWN) — $timestamp ==="
+    $report += ('=' * 70)
+    $report += ''
+    $report += 'The last shutdown was NORMAL, but BitLocker required the recovery key'
+    $report += 'at the next boot. This suggests something changed the boot configuration'
+    $report += 'between shutdown and startup (BIOS update, boot order change, Secure Boot'
+    $report += 'policy change, TPM issue, or a one-time TPM measurement mismatch).'
+    $report += ''
+    $report += (Format-BitLockerReport -Events $bitlockerEvents)
+    $report += ''
+    $report += ('-' * 70)
+    $report | Out-File -FilePath $ShutdownLog -Append -Encoding UTF8
+    Start-Process notepad.exe $ShutdownLog
     exit 0
 }
 
@@ -569,6 +672,14 @@ if ($dumps) {
     $report += ''
 } else {
     $report += '(No minidump files found near the crash time.)'
+    $report += ''
+}
+
+# --- BitLocker Recovery ---
+if ($bitlockerTriggered) {
+    $report += (Format-BitLockerReport -Events $bitlockerEvents)
+    $report += 'The abnormal shutdown likely corrupted boot measurements, causing TPM to'
+    $report += 'refuse to release the BitLocker key at the next boot.'
     $report += ''
 }
 
@@ -759,6 +870,11 @@ if ($conclusive) {
     $report += '5. Should I run any additional diagnostics (memtest, disk check, etc.)?'
     $report += '6. Is there a pattern in the timestamps or error sources that points'
     $report += '   to a specific component?'
+    if ($bitlockerTriggered) {
+        $report += '7. BitLocker required the recovery key after this abnormal shutdown.'
+        $report += '   What specifically caused the TPM to invalidate the boot measurements?'
+        $report += '   How can I prevent this from recurring?'
+    }
 }
 
 # --- Trend Summary ---
